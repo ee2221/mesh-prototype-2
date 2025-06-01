@@ -4,6 +4,15 @@ import { OrbitControls, TransformControls, Grid } from '@react-three/drei';
 import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
 
+const ControlMesh = ({ vertex, radius }: { vertex: THREE.Vector3, radius: number }) => {
+  return (
+    <mesh position={vertex}>
+      <sphereGeometry args={[radius, 8, 8]} />
+      <meshBasicMaterial wireframe color="#00ff00" transparent opacity={0.5} />
+    </mesh>
+  );
+};
+
 const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
   const mesh = useRef<THREE.Mesh>(null);
   const dragStart = useRef<THREE.Vector3>();
@@ -12,6 +21,7 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
   const { camera, controls } = useThree();
+  const [controlMeshRadius, setControlMeshRadius] = useState(1);
 
   const calculateFalloff = (distance: number, radius: number = 1): number => {
     if (distance >= radius) return 0;
@@ -37,7 +47,6 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const onPointerMove = (e: any) => {
     if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current) return;
 
-    // Lock camera only while Shift is held
     if (e.shiftKey && controls) {
       (controls as any).enabled = false;
     } else if (controls) {
@@ -54,7 +63,7 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const localDelta = delta.clone().applyMatrix4(worldToLocal);
 
     const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    const maxRadius = 2;
+    const maxRadius = controlMeshRadius;
     
     for (let i = 0; i < positionAttribute.count; i++) {
       const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, i);
@@ -81,26 +90,44 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     }
   };
 
+  const onWheel = (e: WheelEvent) => {
+    if (selected) {
+      e.preventDefault();
+      const delta = e.deltaY * 0.001;
+      setControlMeshRadius(prev => Math.max(0.1, Math.min(5, prev - delta)));
+    }
+  };
+
+  React.useEffect(() => {
+    if (selected) {
+      window.addEventListener('wheel', onWheel, { passive: false });
+      return () => window.removeEventListener('wheel', onWheel);
+    }
+  }, [selected]);
+
   return (
-    <mesh
-      ref={mesh}
-      position={position}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-    >
-      <sphereGeometry args={[0.05, 16, 16]} />
-      <meshBasicMaterial 
-        color={selected ? '#ff0000' : '#ffffff'}
-        transparent
-        opacity={0.8}
-        depthTest={false}
-      />
-    </mesh>
+    <>
+      <mesh
+        ref={mesh}
+        position={position}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      >
+        <sphereGeometry args={[0.05, 16, 16]} />
+        <meshBasicMaterial 
+          color={selected ? '#ff0000' : '#ffffff'}
+          transparent
+          opacity={0.8}
+          depthTest={false}
+        />
+      </mesh>
+      {selected && <ControlMesh vertex={position} radius={controlMeshRadius} />}
+    </>
   );
 };
 
