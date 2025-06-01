@@ -23,12 +23,6 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const { camera, controls } = useThree();
   const [controlMeshRadius, setControlMeshRadius] = useState(1);
 
-  const calculateFalloff = (distance: number, radius: number = 1): number => {
-    if (distance >= radius) return 0;
-    const t = distance / radius;
-    return 0.5 * (1 + Math.cos(Math.PI * t));
-  };
-
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
@@ -63,21 +57,18 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const localDelta = delta.clone().applyMatrix4(worldToLocal);
 
     const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    const maxRadius = controlMeshRadius;
+    const newPosition = selectedVertexPos.clone().add(localDelta);
+
+    // Calculate distance from original position
+    const distance = selectedVertexPos.distanceTo(newPosition);
     
-    for (let i = 0; i < positionAttribute.count; i++) {
-      const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, i);
-      const distance = vertex.distanceTo(selectedVertexPos);
-      const influence = calculateFalloff(distance, maxRadius);
-      
-      if (influence > 0) {
-        const newPosition = vertex.clone().add(localDelta.clone().multiplyScalar(influence));
-        positionAttribute.setXYZ(i, newPosition.x, newPosition.y, newPosition.z);
-      }
+    // If the new position is within the control mesh radius, update the vertex
+    if (distance <= controlMeshRadius) {
+      positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
+      positionAttribute.needsUpdate = true;
+      geometry.computeVertexNormals();
     }
 
-    positionAttribute.needsUpdate = true;
-    geometry.computeVertexNormals();
     dragStart.current.copy(intersectionPoint);
   };
 
