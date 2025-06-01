@@ -13,62 +13,55 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const positionAttribute = geometry?.attributes.position;
   const { camera, controls } = useThree();
 
-  // Maya-like soft selection falloff function with smoother curve
   const calculateFalloff = (distance: number, radius: number = 1): number => {
     if (distance >= radius) return 0;
     const t = distance / radius;
-    // Maya's smooth falloff curve
     return 0.5 * (1 + Math.cos(Math.PI * t));
   };
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
-      // Create drag plane perpendicular to camera view
       const planeNormal = new THREE.Vector3();
       camera.getWorldDirection(planeNormal);
       dragPlane.current = new THREE.Plane(planeNormal, 0);
       
-      // Set plane position at vertex
       const worldPosition = new THREE.Vector3();
       mesh.current.getWorldPosition(worldPosition);
       dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
       
       dragStart.current = worldPosition;
-      
-      // Lock camera controls if Shift is pressed
-      if (e.shiftKey && controls) {
-        (controls as any).enabled = false;
-      }
     }
   };
 
   const onPointerMove = (e: any) => {
     if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current) return;
 
-    // Project mouse position onto drag plane
+    // Lock camera only while Shift is held
+    if (e.shiftKey && controls) {
+      (controls as any).enabled = false;
+    } else if (controls) {
+      (controls as any).enabled = true;
+    }
+
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(e.point, camera);
     const intersectionPoint = new THREE.Vector3();
     raycaster.ray.intersectPlane(dragPlane.current, intersectionPoint);
     
     const delta = intersectionPoint.sub(dragStart.current);
-    
-    // Convert to object space with proper transformation
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.clone().applyMatrix4(worldToLocal);
 
     const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    const maxRadius = 2; // Maximum influence radius
+    const maxRadius = 2;
     
-    // Update vertices with improved soft selection
     for (let i = 0; i < positionAttribute.count; i++) {
       const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, i);
       const distance = vertex.distanceTo(selectedVertexPos);
       const influence = calculateFalloff(distance, maxRadius);
       
       if (influence > 0) {
-        // Apply smooth transformation
         const newPosition = vertex.clone().add(localDelta.clone().multiplyScalar(influence));
         positionAttribute.setXYZ(i, newPosition.x, newPosition.y, newPosition.z);
       }
@@ -79,11 +72,10 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     dragStart.current.copy(intersectionPoint);
   };
 
-  const onPointerUp = (e: any) => {
+  const onPointerUp = () => {
     dragStart.current = undefined;
     dragPlane.current = undefined;
     
-    // Re-enable camera controls
     if (controls) {
       (controls as any).enabled = true;
     }
