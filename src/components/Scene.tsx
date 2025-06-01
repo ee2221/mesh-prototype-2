@@ -24,6 +24,33 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const [controlMeshRadius, setControlMeshRadius] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Find connected vertices
+  const findConnectedVertices = () => {
+    const connectedIndices = new Set<number>();
+    const index = geometry.index;
+    
+    if (!index) return connectedIndices;
+
+    for (let i = 0; i < index.count; i += 3) {
+      const a = index.getX(i);
+      const b = index.getX(i + 1);
+      const c = index.getX(i + 2);
+
+      if (a === vertexIndex) {
+        connectedIndices.add(b);
+        connectedIndices.add(c);
+      } else if (b === vertexIndex) {
+        connectedIndices.add(a);
+        connectedIndices.add(c);
+      } else if (c === vertexIndex) {
+        connectedIndices.add(a);
+        connectedIndices.add(b);
+      }
+    }
+
+    return connectedIndices;
+  };
+
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
@@ -37,13 +64,6 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
       dragPlane.current = new THREE.Plane();
       dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
       dragStart.current = worldPosition.clone();
-
-      const mouse = new THREE.Vector2(
-        (e.point.x / window.innerWidth) * 2 - 1,
-        -(e.point.y / window.innerHeight) * 2 + 1
-      );
-
-      raycaster.setFromCamera(mouse, camera);
     }
   };
 
@@ -67,9 +87,21 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const currentPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     const newPosition = currentPos.clone().add(localDelta);
 
+    // Check if the new position is within the control mesh radius
     const distance = currentPos.distanceTo(newPosition);
     if (distance <= controlMeshRadius) {
+      // Update the selected vertex
       positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
+
+      // Update connected vertices to maintain cube structure
+      const connectedVertices = findConnectedVertices();
+      connectedVertices.forEach(connectedIndex => {
+        const connectedPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, connectedIndex);
+        const direction = connectedPos.clone().sub(currentPos).normalize();
+        const newConnectedPos = newPosition.clone().add(direction.multiplyScalar(1));
+        positionAttribute.setXYZ(connectedIndex, newConnectedPos.x, newConnectedPos.y, newConnectedPos.z);
+      });
+
       positionAttribute.needsUpdate = true;
       geometry.computeVertexNormals();
     }
