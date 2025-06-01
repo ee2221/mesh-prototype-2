@@ -14,32 +14,6 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const findConnectedVertices = () => {
-    const connectedIndices = new Set<number>();
-    const index = geometry.index;
-    
-    if (!index) return connectedIndices;
-
-    for (let i = 0; i < index.count; i += 3) {
-      const a = index.getX(i);
-      const b = index.getX(i + 1);
-      const c = index.getX(i + 2);
-
-      if (a === vertexIndex) {
-        connectedIndices.add(b);
-        connectedIndices.add(c);
-      } else if (b === vertexIndex) {
-        connectedIndices.add(a);
-        connectedIndices.add(c);
-      } else if (c === vertexIndex) {
-        connectedIndices.add(a);
-        connectedIndices.add(b);
-      }
-    }
-
-    return connectedIndices;
-  };
-
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
@@ -62,17 +36,8 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const originalPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     const newPosition = originalPos.clone().add(localDelta);
 
-    // Update the selected vertex
+    // Update only the selected vertex
     positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
-
-    // Update connected vertices to maintain cube structure
-    const connectedVertices = findConnectedVertices();
-    connectedVertices.forEach(connectedIndex => {
-      const connectedPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, connectedIndex);
-      const direction = connectedPos.clone().sub(originalPos).normalize();
-      const newConnectedPos = newPosition.clone().add(direction);
-      positionAttribute.setXYZ(connectedIndex, newConnectedPos.x, newConnectedPos.y, newConnectedPos.z);
-    });
 
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
