@@ -5,24 +5,12 @@ import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
 import { Loader2 } from 'lucide-react';
 
-const ControlMesh = ({ vertex, radius }: { vertex: THREE.Vector3, radius: number }) => {
-  return (
-    <mesh position={vertex}>
-      <sphereGeometry args={[radius, 8, 8]} />
-      <meshBasicMaterial wireframe color="#00ff00" transparent opacity={0.5} />
-    </mesh>
-  );
-};
-
 const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
   const mesh = useRef<THREE.Mesh>(null);
   const dragStart = useRef<THREE.Vector3>();
-  const dragOffset = useRef<THREE.Vector3>();
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
-  const { camera } = useThree();
-  const [controlMeshRadius, setControlMeshRadius] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -57,7 +45,6 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     if (selected && mesh.current) {
       setIsDragging(true);
       dragStart.current = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
-      dragOffset.current = position.clone().sub(dragStart.current);
     }
   };
 
@@ -75,50 +62,30 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const originalPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     const newPosition = originalPos.clone().add(localDelta);
 
-    // Constrain movement within control mesh radius
-    const distance = originalPos.distanceTo(newPosition);
-    if (distance <= controlMeshRadius) {
-      // Update the selected vertex
-      positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
+    // Update the selected vertex
+    positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
 
-      // Update connected vertices
-      const connectedVertices = findConnectedVertices();
-      connectedVertices.forEach(connectedIndex => {
-        const connectedPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, connectedIndex);
-        const direction = connectedPos.clone().sub(originalPos).normalize();
-        const newConnectedPos = newPosition.clone().add(direction);
-        positionAttribute.setXYZ(connectedIndex, newConnectedPos.x, newConnectedPos.y, newConnectedPos.z);
-      });
+    // Update connected vertices to maintain cube structure
+    const connectedVertices = findConnectedVertices();
+    connectedVertices.forEach(connectedIndex => {
+      const connectedPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, connectedIndex);
+      const direction = connectedPos.clone().sub(originalPos).normalize();
+      const newConnectedPos = newPosition.clone().add(direction);
+      positionAttribute.setXYZ(connectedIndex, newConnectedPos.x, newConnectedPos.y, newConnectedPos.z);
+    });
 
-      positionAttribute.needsUpdate = true;
-      geometry.computeVertexNormals();
-      dragStart.current = currentPoint;
-    }
+    positionAttribute.needsUpdate = true;
+    geometry.computeVertexNormals();
+    dragStart.current = currentPoint;
 
     setIsProcessing(false);
   };
 
   const onPointerUp = () => {
     dragStart.current = undefined;
-    dragOffset.current = undefined;
     setIsDragging(false);
     setIsProcessing(false);
   };
-
-  const onWheel = (e: WheelEvent) => {
-    if (selected) {
-      e.preventDefault();
-      const delta = e.deltaY * 0.001;
-      setControlMeshRadius(prev => Math.max(0.1, Math.min(5, prev - delta)));
-    }
-  };
-
-  React.useEffect(() => {
-    if (selected) {
-      window.addEventListener('wheel', onWheel, { passive: false });
-      return () => window.removeEventListener('wheel', onWheel);
-    }
-  }, [selected]);
 
   return (
     <>
@@ -141,7 +108,6 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
           depthTest={false}
         />
       </mesh>
-      {selected && <ControlMesh vertex={position} radius={controlMeshRadius} />}
       {isProcessing && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-white rounded-lg shadow-lg p-2 flex items-center gap-2">
           <Loader2 className="w-5 h-5 animate-spin" />
