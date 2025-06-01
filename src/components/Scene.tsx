@@ -7,23 +7,34 @@ import * as THREE from 'three';
 const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
   const mesh = useRef<THREE.Mesh>(null);
   const dragStart = useRef<THREE.Vector3>();
+  const dragPlane = useRef<THREE.Plane>();
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
-  const { controls } = useThree();
+  const { camera, controls } = useThree();
 
-  // Maya-like soft selection falloff function
+  // Maya-like soft selection falloff function with smoother curve
   const calculateFalloff = (distance: number, radius: number = 1): number => {
     if (distance >= radius) return 0;
     const t = distance / radius;
-    return Math.pow(1 - Math.pow(t, 2), 2);
+    // Maya's smooth falloff curve
+    return 0.5 * (1 + Math.cos(Math.PI * t));
   };
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
-      dragStart.current = new THREE.Vector3();
-      mesh.current.getWorldPosition(dragStart.current);
+      // Create drag plane perpendicular to camera view
+      const planeNormal = new THREE.Vector3();
+      camera.getWorldDirection(planeNormal);
+      dragPlane.current = new THREE.Plane(planeNormal, 0);
+      
+      // Set plane position at vertex
+      const worldPosition = new THREE.Vector3();
+      mesh.current.getWorldPosition(worldPosition);
+      dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
+      
+      dragStart.current = worldPosition;
       
       // Lock camera controls if Shift is pressed
       if (e.shiftKey && controls) {
@@ -33,22 +44,31 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragStart.current || !selected || !positionAttribute || !mesh.current) return;
+    if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current) return;
 
-    const pointer = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
-    const delta = pointer.sub(dragStart.current);
+    // Project mouse position onto drag plane
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(e.point, camera);
+    const intersectionPoint = new THREE.Vector3();
+    raycaster.ray.intersectPlane(dragPlane.current, intersectionPoint);
     
+    const delta = intersectionPoint.sub(dragStart.current);
+    
+    // Convert to object space with proper transformation
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.clone().applyMatrix4(worldToLocal);
 
     const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
+    const maxRadius = 2; // Maximum influence radius
     
+    // Update vertices with improved soft selection
     for (let i = 0; i < positionAttribute.count; i++) {
       const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, i);
       const distance = vertex.distanceTo(selectedVertexPos);
-      const influence = calculateFalloff(distance, 2);
+      const influence = calculateFalloff(distance, maxRadius);
       
       if (influence > 0) {
+        // Apply smooth transformation
         const newPosition = vertex.clone().add(localDelta.clone().multiplyScalar(influence));
         positionAttribute.setXYZ(i, newPosition.x, newPosition.y, newPosition.z);
       }
@@ -56,11 +76,12 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
 
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
-    dragStart.current.copy(pointer);
+    dragStart.current.copy(intersectionPoint);
   };
 
   const onPointerUp = (e: any) => {
     dragStart.current = undefined;
+    dragPlane.current = undefined;
     
     // Re-enable camera controls
     if (controls) {
