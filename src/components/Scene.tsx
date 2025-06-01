@@ -5,11 +5,10 @@ import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
 
 const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
-  const mesh = useRef<THREE.Mesh>(null);
-  const dragStart = useRef<THREE.Vector3>();
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
+  const dragStart = useRef<THREE.Vector3 | null>(null);
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
@@ -24,26 +23,28 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const currentPoint = e.point.clone();
     const delta = currentPoint.sub(dragStart.current);
     
+    // Convert world space delta to object space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.applyMatrix4(worldToLocal);
-    
+
+    // Update only the selected vertex position
     const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     vertex.add(localDelta);
-    
     positionAttribute.setXYZ(vertexIndex, vertex.x, vertex.y, vertex.z);
     positionAttribute.needsUpdate = true;
+    
+    // Recompute normals to maintain proper lighting
     geometry.computeVertexNormals();
     
-    dragStart.current = e.point.clone();
+    dragStart.current = currentPoint;
   };
 
   const onPointerUp = () => {
-    dragStart.current = undefined;
+    dragStart.current = null;
   };
 
   return (
     <mesh
-      ref={mesh}
       position={position}
       onClick={(e) => {
         e.stopPropagation();
@@ -75,6 +76,7 @@ const MeshHelpers = () => {
   const vertexIndices: number[] = [];
   const matrix = selectedObject.matrixWorld;
 
+  // Get all vertices in world space
   for (let i = 0; i < position.count; i++) {
     const vertex = new THREE.Vector3();
     vertex.fromBufferAttribute(position, i);
