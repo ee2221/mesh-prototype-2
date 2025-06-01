@@ -13,26 +13,28 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
-    if (selected && mesh.current) {
-      dragStart.current = new THREE.Vector3().copy(e.point);
+    if (selected) {
+      dragStart.current = e.point.clone();
     }
   };
 
   const onPointerMove = (e: any) => {
     if (!dragStart.current || !selected || !positionAttribute) return;
 
-    const currentPoint = new THREE.Vector3().copy(e.point);
+    const currentPoint = e.point.clone();
     const delta = currentPoint.sub(dragStart.current);
     
-    const localDelta = delta.clone().applyMatrix4(selectedObject.matrixWorld.clone().invert());
-    const currentPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    const newPos = currentPos.add(localDelta);
+    const worldToLocal = selectedObject.matrixWorld.clone().invert();
+    const localDelta = delta.applyMatrix4(worldToLocal);
     
-    positionAttribute.setXYZ(vertexIndex, newPos.x, newPos.y, newPos.z);
+    const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
+    vertex.add(localDelta);
+    
+    positionAttribute.setXYZ(vertexIndex, vertex.x, vertex.y, vertex.z);
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
     
-    dragStart.current.copy(e.point);
+    dragStart.current = e.point.clone();
   };
 
   const onPointerUp = () => {
