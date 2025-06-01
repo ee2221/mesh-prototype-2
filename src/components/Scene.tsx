@@ -3,6 +3,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid } from '@react-three/drei';
 import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
+import { Loader2 } from 'lucide-react';
 
 const ControlMesh = ({ vertex, radius }: { vertex: THREE.Vector3, radius: number }) => {
   return (
@@ -16,15 +17,15 @@ const ControlMesh = ({ vertex, radius }: { vertex: THREE.Vector3, radius: number
 const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
   const mesh = useRef<THREE.Mesh>(null);
   const dragStart = useRef<THREE.Vector3>();
-  const dragPlane = useRef<THREE.Plane>();
+  const dragOffset = useRef<THREE.Vector3>();
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
-  const { camera, raycaster } = useThree();
+  const { camera } = useThree();
   const [controlMeshRadius, setControlMeshRadius] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Find connected vertices
   const findConnectedVertices = () => {
     const connectedIndices = new Set<number>();
     const index = geometry.index;
@@ -55,64 +56,53 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     e.stopPropagation();
     if (selected && mesh.current) {
       setIsDragging(true);
-      const planeNormal = new THREE.Vector3();
-      camera.getWorldDirection(planeNormal);
-      
-      const worldPosition = new THREE.Vector3();
-      mesh.current.getWorldPosition(worldPosition);
-      
-      dragPlane.current = new THREE.Plane();
-      dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
-      dragStart.current = worldPosition.clone();
+      dragStart.current = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
+      dragOffset.current = position.clone().sub(dragStart.current);
     }
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current || !isDragging) return;
+    if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !isDragging) return;
 
-    const mouse = new THREE.Vector2(
-      (e.point.x / window.innerWidth) * 2 - 1,
-      -(e.point.y / window.innerHeight) * 2 + 1
-    );
-    raycaster.setFromCamera(mouse, camera);
+    setIsProcessing(true);
 
-    const intersectionPoint = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlane.current, intersectionPoint);
-
+    const currentPoint = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
+    const worldDelta = currentPoint.clone().sub(dragStart.current);
+    
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
-    const localIntersection = intersectionPoint.clone().applyMatrix4(worldToLocal);
-    const localStart = dragStart.current.clone().applyMatrix4(worldToLocal);
-    const localDelta = localIntersection.sub(localStart);
+    const localDelta = worldDelta.clone().applyMatrix4(worldToLocal);
 
-    const currentPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    const newPosition = currentPos.clone().add(localDelta);
+    const originalPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
+    const newPosition = originalPos.clone().add(localDelta);
 
-    // Check if the new position is within the control mesh radius
-    const distance = currentPos.distanceTo(newPosition);
+    // Constrain movement within control mesh radius
+    const distance = originalPos.distanceTo(newPosition);
     if (distance <= controlMeshRadius) {
       // Update the selected vertex
       positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
 
-      // Update connected vertices to maintain cube structure
+      // Update connected vertices
       const connectedVertices = findConnectedVertices();
       connectedVertices.forEach(connectedIndex => {
         const connectedPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, connectedIndex);
-        const direction = connectedPos.clone().sub(currentPos).normalize();
-        const newConnectedPos = newPosition.clone().add(direction.multiplyScalar(1));
+        const direction = connectedPos.clone().sub(originalPos).normalize();
+        const newConnectedPos = newPosition.clone().add(direction);
         positionAttribute.setXYZ(connectedIndex, newConnectedPos.x, newConnectedPos.y, newConnectedPos.z);
       });
 
       positionAttribute.needsUpdate = true;
       geometry.computeVertexNormals();
+      dragStart.current = currentPoint;
     }
 
-    dragStart.current = intersectionPoint;
+    setIsProcessing(false);
   };
 
   const onPointerUp = () => {
     dragStart.current = undefined;
-    dragPlane.current = undefined;
+    dragOffset.current = undefined;
     setIsDragging(false);
+    setIsProcessing(false);
   };
 
   const onWheel = (e: WheelEvent) => {
@@ -152,6 +142,12 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
         />
       </mesh>
       {selected && <ControlMesh vertex={position} radius={controlMeshRadius} />}
+      {isProcessing && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-white rounded-lg shadow-lg p-2 flex items-center gap-2">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span>Processing changes...</span>
+        </div>
+      )}
     </>
   );
 };
