@@ -5,77 +5,56 @@ import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
 
 const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
+  const mesh = useRef<THREE.Mesh>(null);
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
   const dragStart = useRef<THREE.Vector3 | null>(null);
-
-  // Find connected vertices (sharing faces)
-  const getConnectedVertices = (vertexIndex: number) => {
-    const indices = geometry.index ? Array.from(geometry.index.array) : [];
-    const connected = new Set<number>();
-    
-    // Loop through faces (triangles)
-    for (let i = 0; i < indices.length; i += 3) {
-      const face = [indices[i], indices[i + 1], indices[i + 2]];
-      if (face.includes(vertexIndex)) {
-        // Add other vertices from the same face
-        face.forEach(idx => {
-          if (idx !== vertexIndex) connected.add(idx);
-        });
-      }
-    }
-    
-    return Array.from(connected);
-  };
+  const initialPositions = useRef<Float32Array | null>(null);
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
-    if (selected) {
+    if (selected && mesh.current) {
       dragStart.current = e.point.clone();
+      // Store initial positions of all vertices
+      initialPositions.current = new Float32Array(positionAttribute.array);
     }
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragStart.current || !selected || !positionAttribute) return;
+    if (!dragStart.current || !selected || !positionAttribute || !initialPositions.current) return;
 
     const currentPoint = e.point.clone();
     const delta = currentPoint.sub(dragStart.current);
     
-    // Convert world space delta to object space
+    // Convert to object space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.applyMatrix4(worldToLocal);
 
-    // Get the original position of the selected vertex
-    const originalPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    
-    // Update selected vertex
-    const newPos = originalPos.clone().add(localDelta);
-    positionAttribute.setXYZ(vertexIndex, newPos.x, newPos.y, newPos.z);
-
-    // Update connected vertices with weighted movement
-    const connectedVertices = getConnectedVertices(vertexIndex);
-    connectedVertices.forEach(connectedIndex => {
-      const connectedPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, connectedIndex);
-      const distance = originalPos.distanceTo(connectedPos);
-      const weight = 1 / (1 + distance); // Weight based on distance
-      const weightedDelta = localDelta.clone().multiplyScalar(weight);
-      connectedPos.add(weightedDelta);
-      positionAttribute.setXYZ(connectedIndex, connectedPos.x, connectedPos.y, connectedPos.z);
-    });
+    // Update vertex positions
+    for (let i = 0; i < positionAttribute.count; i++) {
+      if (i === vertexIndex) {
+        // Move selected vertex
+        const x = initialPositions.current[i * 3] + localDelta.x;
+        const y = initialPositions.current[i * 3 + 1] + localDelta.y;
+        const z = initialPositions.current[i * 3 + 2] + localDelta.z;
+        positionAttribute.setXYZ(i, x, y, z);
+      }
+    }
 
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
-    
     dragStart.current = currentPoint;
   };
 
   const onPointerUp = () => {
     dragStart.current = null;
+    initialPositions.current = null;
   };
 
   return (
     <mesh
+      ref={mesh}
       position={position}
       onClick={(e) => {
         e.stopPropagation();
