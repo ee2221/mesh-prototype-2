@@ -4,52 +4,104 @@ import { OrbitControls, TransformControls, Grid } from '@react-three/drei';
 import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
 
-const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
+const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { 
+  position: THREE.Vector3, 
+  selected: boolean, 
+  onClick: () => void, 
+  vertexIndex: number 
+}) => {
   const mesh = useRef<THREE.Mesh>(null);
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
-  const dragStart = useRef<THREE.Vector3 | null>(null);
-  const initialPositions = useRef<Float32Array | null>(null);
+  const dragStart = useRef<{
+    point: THREE.Vector3;
+    vertexPositions: Float32Array;
+    vertexConnections: Map<number, number[]>;
+  } | null>(null);
+
+  // Calculate vertex connections (which vertices share edges)
+  const calculateVertexConnections = () => {
+    const connections = new Map<number, number[]>();
+    const indices = geometry.index ? Array.from(geometry.index.array) : null;
+    
+    if (indices) {
+      // Using indexed geometry
+      for (let i = 0; i < indices.length; i += 3) {
+        const face = [indices[i], indices[i + 1], indices[i + 2]];
+        face.forEach((v1, i) => {
+          const v2 = face[(i + 1) % 3];
+          if (!connections.has(v1)) connections.set(v1, []);
+          if (!connections.has(v2)) connections.set(v2, []);
+          if (!connections.get(v1)!.includes(v2)) connections.get(v1)!.push(v2);
+          if (!connections.get(v2)!.includes(v1)) connections.get(v2)!.push(v1);
+        });
+      }
+    } else {
+      // Non-indexed geometry, assume every three vertices form a triangle
+      for (let i = 0; i < positionAttribute.count; i += 3) {
+        const face = [i, i + 1, i + 2];
+        face.forEach((v1, i) => {
+          const v2 = face[(i + 1) % 3];
+          if (!connections.has(v1)) connections.set(v1, []);
+          if (!connections.has(v2)) connections.set(v2, []);
+          if (!connections.get(v1)!.includes(v2)) connections.get(v1)!.push(v2);
+          if (!connections.get(v2)!.includes(v1)) connections.get(v2)!.push(v1);
+        });
+      }
+    }
+    return connections;
+  };
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
-    if (selected && mesh.current) {
-      dragStart.current = e.point.clone();
-      // Store initial positions of all vertices
-      initialPositions.current = new Float32Array(positionAttribute.array);
+    if (selected && mesh.current && positionAttribute) {
+      dragStart.current = {
+        point: e.point.clone(),
+        vertexPositions: new Float32Array(positionAttribute.array),
+        vertexConnections: calculateVertexConnections()
+      };
     }
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragStart.current || !selected || !positionAttribute || !initialPositions.current) return;
+    if (!dragStart.current || !selected || !positionAttribute) return;
 
     const currentPoint = e.point.clone();
-    const delta = currentPoint.sub(dragStart.current);
+    const delta = currentPoint.sub(dragStart.current.point);
     
     // Convert to object space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.applyMatrix4(worldToLocal);
 
-    // Update vertex positions
+    // Get connected vertices for smooth deformation
+    const connectedVertices = dragStart.current.vertexConnections.get(vertexIndex) || [];
+    
+    // Update vertex positions with falloff
     for (let i = 0; i < positionAttribute.count; i++) {
       if (i === vertexIndex) {
-        // Move selected vertex
-        const x = initialPositions.current[i * 3] + localDelta.x;
-        const y = initialPositions.current[i * 3 + 1] + localDelta.y;
-        const z = initialPositions.current[i * 3 + 2] + localDelta.z;
+        // Move selected vertex fully
+        const x = dragStart.current.vertexPositions[i * 3] + localDelta.x;
+        const y = dragStart.current.vertexPositions[i * 3 + 1] + localDelta.y;
+        const z = dragStart.current.vertexPositions[i * 3 + 2] + localDelta.z;
+        positionAttribute.setXYZ(i, x, y, z);
+      } else if (connectedVertices.includes(i)) {
+        // Move connected vertices with falloff
+        const falloff = 0.5; // Adjust this value to control the influence
+        const x = dragStart.current.vertexPositions[i * 3] + localDelta.x * falloff;
+        const y = dragStart.current.vertexPositions[i * 3 + 1] + localDelta.y * falloff;
+        const z = dragStart.current.vertexPositions[i * 3 + 2] + localDelta.z * falloff;
         positionAttribute.setXYZ(i, x, y, z);
       }
     }
 
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
-    dragStart.current = currentPoint;
+    dragStart.current.point = currentPoint;
   };
 
   const onPointerUp = () => {
     dragStart.current = null;
-    initialPositions.current = null;
   };
 
   return (
