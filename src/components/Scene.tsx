@@ -20,64 +20,82 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
-  const { camera, controls } = useThree();
+  const { camera, raycaster } = useThree();
+  const controls = useThree((state) => state.controls) as any;
   const [controlMeshRadius, setControlMeshRadius] = useState(1);
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
+      // Create drag plane perpendicular to camera
       const planeNormal = new THREE.Vector3();
       camera.getWorldDirection(planeNormal);
-      dragPlane.current = new THREE.Plane(planeNormal, 0);
       
       const worldPosition = new THREE.Vector3();
       mesh.current.getWorldPosition(worldPosition);
-      dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
       
-      dragStart.current = worldPosition;
+      dragPlane.current = new THREE.Plane();
+      dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
+      dragStart.current = worldPosition.clone();
+
+      // Convert mouse coordinates to normalized device coordinates
+      const mouse = new THREE.Vector2(
+        (e.point.x / window.innerWidth) * 2 - 1,
+        -(e.point.y / window.innerHeight) * 2 + 1
+      );
+
+      // Update raycaster
+      raycaster.setFromCamera(mouse, camera);
     }
   };
 
   const onPointerMove = (e: any) => {
     if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current) return;
 
+    // Lock camera when holding shift
     if (e.shiftKey && controls) {
-      (controls as any).enabled = false;
+      controls.enabled = false;
     } else if (controls) {
-      (controls as any).enabled = true;
+      controls.enabled = true;
     }
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(e.point, camera);
+    // Get intersection point with drag plane
+    const mouse = new THREE.Vector2(
+      (e.point.x / window.innerWidth) * 2 - 1,
+      -(e.point.y / window.innerHeight) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, camera);
+
     const intersectionPoint = new THREE.Vector3();
     raycaster.ray.intersectPlane(dragPlane.current, intersectionPoint);
-    
-    const delta = intersectionPoint.sub(dragStart.current);
+
+    // Calculate movement in local space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
-    const localDelta = delta.clone().applyMatrix4(worldToLocal);
+    const localIntersection = intersectionPoint.clone().applyMatrix4(worldToLocal);
+    const localStart = dragStart.current.clone().applyMatrix4(worldToLocal);
+    const localDelta = localIntersection.sub(localStart);
 
-    const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
-    const newPosition = selectedVertexPos.clone().add(localDelta);
+    // Get current vertex position
+    const currentPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
+    const newPosition = currentPos.clone().add(localDelta);
 
-    // Calculate distance from original position
-    const distance = selectedVertexPos.distanceTo(newPosition);
-    
-    // If the new position is within the control mesh radius, update the vertex
+    // Check if new position is within control mesh radius
+    const distance = currentPos.distanceTo(newPosition);
     if (distance <= controlMeshRadius) {
       positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
       positionAttribute.needsUpdate = true;
       geometry.computeVertexNormals();
     }
 
-    dragStart.current.copy(intersectionPoint);
+    // Update drag start position
+    dragStart.current = intersectionPoint;
   };
 
   const onPointerUp = () => {
     dragStart.current = undefined;
     dragPlane.current = undefined;
-    
     if (controls) {
-      (controls as any).enabled = true;
+      controls.enabled = true;
     }
   };
 
