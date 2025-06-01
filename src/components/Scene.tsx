@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid } from '@react-three/drei';
 import { useSceneStore } from '../store/sceneStore';
@@ -10,12 +10,12 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
+  const { controls } = useThree();
 
   // Maya-like soft selection falloff function
   const calculateFalloff = (distance: number, radius: number = 1): number => {
     if (distance >= radius) return 0;
     const t = distance / radius;
-    // Using Maya's soft selection curve approximation
     return Math.pow(1 - Math.pow(t, 2), 2);
   };
 
@@ -24,24 +24,25 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     if (selected && mesh.current) {
       dragStart.current = new THREE.Vector3();
       mesh.current.getWorldPosition(dragStart.current);
+      
+      // Lock camera controls if Shift is pressed
+      if (e.shiftKey && controls) {
+        (controls as any).enabled = false;
+      }
     }
   };
 
   const onPointerMove = (e: any) => {
     if (!dragStart.current || !selected || !positionAttribute || !mesh.current) return;
 
-    // Get pointer position in world space
     const pointer = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
     const delta = pointer.sub(dragStart.current);
     
-    // Convert to object space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.clone().applyMatrix4(worldToLocal);
 
-    // Get the selected vertex position
     const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     
-    // Update vertices with soft selection
     for (let i = 0; i < positionAttribute.count; i++) {
       const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, i);
       const distance = vertex.distanceTo(selectedVertexPos);
@@ -53,14 +54,18 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
       }
     }
 
-    // Update geometry
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
     dragStart.current.copy(pointer);
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: any) => {
     dragStart.current = undefined;
+    
+    // Re-enable camera controls
+    if (controls) {
+      (controls as any).enabled = true;
+    }
   };
 
   return (
@@ -97,14 +102,12 @@ const MeshHelpers = () => {
   const vertexIndices: number[] = [];
   const matrix = selectedObject.matrixWorld;
 
-  // Get unique vertices using a more precise comparison
   const uniqueVertices = new Map<string, number>();
   for (let i = 0; i < position.count; i++) {
     const vertex = new THREE.Vector3();
     vertex.fromBufferAttribute(position, i);
     vertex.applyMatrix4(matrix);
     
-    // Use higher precision for vertex position comparison
     const key = `${vertex.x.toFixed(6)},${vertex.y.toFixed(6)},${vertex.z.toFixed(6)}`;
     if (!uniqueVertices.has(key)) {
       uniqueVertices.set(key, i);
