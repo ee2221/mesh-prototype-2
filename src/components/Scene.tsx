@@ -21,13 +21,13 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
   const { camera, raycaster } = useThree();
-  const controls = useThree((state) => state.controls) as any;
   const [controlMeshRadius, setControlMeshRadius] = useState(1);
+  const [isDragging, setIsDragging] = useState(false);
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
     if (selected && mesh.current) {
-      // Create drag plane perpendicular to camera
+      setIsDragging(true);
       const planeNormal = new THREE.Vector3();
       camera.getWorldDirection(planeNormal);
       
@@ -38,28 +38,18 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
       dragPlane.current.setFromNormalAndCoplanarPoint(planeNormal, worldPosition);
       dragStart.current = worldPosition.clone();
 
-      // Convert mouse coordinates to normalized device coordinates
       const mouse = new THREE.Vector2(
         (e.point.x / window.innerWidth) * 2 - 1,
         -(e.point.y / window.innerHeight) * 2 + 1
       );
 
-      // Update raycaster
       raycaster.setFromCamera(mouse, camera);
     }
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current) return;
+    if (!dragStart.current || !selected || !positionAttribute || !mesh.current || !dragPlane.current || !isDragging) return;
 
-    // Lock camera when holding shift
-    if (e.shiftKey && controls) {
-      controls.enabled = false;
-    } else if (controls) {
-      controls.enabled = true;
-    }
-
-    // Get intersection point with drag plane
     const mouse = new THREE.Vector2(
       (e.point.x / window.innerWidth) * 2 - 1,
       -(e.point.y / window.innerHeight) * 2 + 1
@@ -69,17 +59,14 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
     const intersectionPoint = new THREE.Vector3();
     raycaster.ray.intersectPlane(dragPlane.current, intersectionPoint);
 
-    // Calculate movement in local space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localIntersection = intersectionPoint.clone().applyMatrix4(worldToLocal);
     const localStart = dragStart.current.clone().applyMatrix4(worldToLocal);
     const localDelta = localIntersection.sub(localStart);
 
-    // Get current vertex position
     const currentPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     const newPosition = currentPos.clone().add(localDelta);
 
-    // Check if new position is within control mesh radius
     const distance = currentPos.distanceTo(newPosition);
     if (distance <= controlMeshRadius) {
       positionAttribute.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
@@ -87,16 +74,13 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
       geometry.computeVertexNormals();
     }
 
-    // Update drag start position
     dragStart.current = intersectionPoint;
   };
 
   const onPointerUp = () => {
     dragStart.current = undefined;
     dragPlane.current = undefined;
-    if (controls) {
-      controls.enabled = true;
-    }
+    setIsDragging(false);
   };
 
   const onWheel = (e: WheelEvent) => {
@@ -199,6 +183,30 @@ const Scene: React.FC = () => {
     editMode,
     clearElementSelection
   } = useSceneStore();
+  
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
+
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   return (
     <Canvas
@@ -252,7 +260,7 @@ const Scene: React.FC = () => {
 
       <OrbitControls
         makeDefault
-        enabled={true}
+        enabled={!isShiftPressed}
       />
     </Canvas>
   );
